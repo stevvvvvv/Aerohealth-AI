@@ -161,6 +161,16 @@ cd ../frontend
 npm install && npm run dev                      # http://localhost:5173
 ```
 
+### Live demo (Hugging Face Spaces)
+
+`deploy/huggingface/` packages dashboard + API + SQLite into one container (the fleet is seeded at
+build time). To (re)deploy:
+
+```bash
+pip install huggingface_hub
+HF_TOKEN=hf_xxx HF_SPACE=<user>/aerohealth-ai python deploy/huggingface/push.py
+```
+
 ---
 
 ## API

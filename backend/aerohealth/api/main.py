@@ -6,7 +6,12 @@ import threading
 from collections import Counter
 from contextlib import asynccontextmanager
 
+import os
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
@@ -225,3 +230,17 @@ def acknowledge(alert_id: int, db: Session = Depends(get_db)):
     a.acknowledged = True
     db.commit()
     return _alert_out(a, a.engine.serial)
+
+
+# ---------------------------------------------------------------------------
+# Optional: serve the built dashboard from the API (single-container demo).
+STATIC_DIR = Path(os.getenv("STATIC_DIR", ""))
+if os.getenv("STATIC_DIR") and (STATIC_DIR / "index.html").exists():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(404, "Not found")
+        f = STATIC_DIR / path
+        return FileResponse(f if path and f.is_file() else STATIC_DIR / "index.html")
