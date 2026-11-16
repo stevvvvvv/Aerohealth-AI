@@ -1,0 +1,55 @@
+[FD001] 15 informative sensors: ['s2', 's3', 's4', 's6', 's7', 's8', 's9', 's11', 's12', 's13', 's14', 's15', 's17', 's20', 's21']
+train windows (16390, 30, 15), val windows (4241, 30, 15)
+epoch   1  train RMSE  85.60  val RMSE  69.03
+epoch   2  train RMSE  48.15  val RMSE  23.02
+epoch   3  train RMSE  20.94  val RMSE  15.58
+epoch   4  train RMSE  18.24  val RMSE  14.75
+epoch   5  train RMSE  17.54  val RMSE  14.54
+epoch   6  train RMSE  17.09  val RMSE  14.54
+epoch   7  train RMSE  16.89  val RMSE  14.23
+epoch   8  train RMSE  16.57  val RMSE  15.20
+epoch   9  train RMSE  16.29  val RMSE  14.01
+epoch  10  train RMSE  16.04  val RMSE  15.41
+epoch  11  train RMSE  15.95  val RMSE  14.62
+epoch  12  train RMSE  15.69  val RMSE  15.94
+epoch  13  train RMSE  15.64  val RMSE  15.28
+epoch  14  train RMSE  15.55  val RMSE  15.99
+epoch  15  train RMSE  15.15  val RMSE  15.62
+epoch  16  train RMSE  15.04  val RMSE  15.84
+epoch  17  train RMSE  15.00  val RMSE  15.38
+epoch  18  train RMSE  14.87  val RMSE  15.31
+epoch  19  train RMSE  14.76  val RMSE  15.63
+epoch  20  train RMSE  14.56  val RMSE  15.24
+epoch  21  train RMSE  14.65  val RMSE  15.99
+epoch  22  train RMSE  14.45  val RMSE  16.30
+epoch  23  train RMSE  14.46  val RMSE  16.42
+epoch  24  train RMSE  14.32  val RMSE  16.23
+epoch  25  train RMSE  14.13  val RMSE  16.19
+epoch  26  train RMSE  14.37  val RMSE  16.07
+epoch  27  train RMSE  14.32  val RMSE  16.39
+epoch  28  train RMSE  14.16  val RMSE  16.08
+epoch  29  train RMSE  14.22  val RMSE  16.52
+calibration factor k = 2.42 (raw z = 1.64)
+{
+  "dataset": "FD001",
+  "n_test_engines": 100,
+  "lstm": {
+    "rmse": 14.18,
+    "rmse_mc_mean": 14.52,
+    "nasa_score": 372.1,
+    "interval_coverage_pct": 91.0,
+    "mean_interval_width": 50.6
+  },
+  "baseline_gbm": {
+    "rmse": 12.41,
+    "nasa_score": 239.9
+  },
+  "anomaly_detection": {
+    "engines_detected_pct": 100.0,
+    "median_lead_time_cycles": 58.0,
+    "false_alarm_rate_pct": 0.24
+  },
+  "interval_level_pct": 90,
+  "epochs_trained": 29
+}
+artifacts saved to /home/claude/aerohealth-ai/backend/artifacts

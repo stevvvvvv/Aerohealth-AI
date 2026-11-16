@@ -1,0 +1,6 @@
+* text=auto
+*.sh text eol=lf
+*.pt binary
+*.joblib binary
+*.npy binary
+*.png binary
