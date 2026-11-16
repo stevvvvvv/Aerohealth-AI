@@ -5,6 +5,8 @@ It detects abnormal engine behaviour, forecasts the **Remaining Useful Life (RUL
 confidence interval, explains every prediction with **SHAP**, and raises risk-based alerts in a
 dashboard designed for a maintenance engineer.
 
+**▶ [Live demo](https://stevvvvvv.github.io/Aerohealth-AI/)** — no install needed (static snapshot of the dashboard; run it with Docker for live inference).
+
 ![Engine view — RUL forecast with calibrated interval, health index and anomaly score](docs/02-engine-rul-health.png)
 
 | | |
@@ -161,14 +163,15 @@ cd ../frontend
 npm install && npm run dev                      # http://localhost:5173
 ```
 
-### Live demo (Hugging Face Spaces)
+### Static demo (GitHub Pages)
 
-`deploy/huggingface/` packages dashboard + API + SQLite into one container (the fleet is seeded at
-build time). To (re)deploy:
+The [live demo](https://stevvvvvv.github.io/Aerohealth-AI/) is a static build of the dashboard: the
+API responses for the whole FD001 test fleet are computed by the real models, then frozen as JSON
+(SHAP every 10 cycles). To rebuild it:
 
 ```bash
-pip install huggingface_hub
-HF_TOKEN=hf_xxx HF_SPACE=<user>/aerohealth-ai python deploy/huggingface/push.py
+cd backend && python -m aerohealth.api.seed --reset && python -m scripts.export_static
+cd ../frontend && npm run build:pages          # -> site/, pushed to the gh-pages branch
 ```
 
 ---

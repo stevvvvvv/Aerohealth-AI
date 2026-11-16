@@ -95,3 +95,5 @@ input, select { background: var(--surface-2); border: 1px solid var(--border); c
   .sidebar footer { display: none; }
   .grid-2 { grid-template-columns: 1fr; }
 }
+
+.demo-note { margin-top: 12px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; line-height: 1.5; color: var(--text-2); }

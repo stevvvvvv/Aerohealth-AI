@@ -3,6 +3,7 @@ import Fleet from "./pages/Fleet.jsx";
 import EngineView from "./pages/EngineView.jsx";
 import Alerts from "./pages/Alerts.jsx";
 import Model from "./pages/Model.jsx";
+import { STATIC } from "./api.js";
 
 export default function App() {
   return (
@@ -28,6 +29,12 @@ export default function App() {
           NASA C-MAPSS · FD001
           <br />
           Turbofan degradation simulation
+          {STATIC && (
+            <p className="demo-note">
+              Static demo: model outputs precomputed on the NASA test fleet, SHAP every 10 cycles.{" "}
+              <a href="https://github.com/stevvvvvv/Aerohealth-AI">Run it live with Docker</a>.
+            </p>
+          )}
         </footer>
       </aside>
       <main className="content">

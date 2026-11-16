@@ -6,3 +6,6 @@ backend/*.db
 node_modules/
 frontend/dist/
 .env
+# static GitHub Pages demo (built locally, pushed to the gh-pages branch)
+site/
+frontend/static-data/
