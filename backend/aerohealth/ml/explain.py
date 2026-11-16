@@ -1,9 +1,12 @@
-"""SHAP explanations for the LSTM RUL model.
+"""SHAP explanations for the RUL ensemble.
 
-``shap.GradientExplainer`` (expected gradients) attributes the prediction to
-every (time step, sensor) cell of the input window. We aggregate it:
-  * per sensor  -> which measurements drive the RUL estimate,
-  * per cycle   -> which part of the recent history matters most.
+The served prediction is ``w * mean(LSTMs) + (1 - w) * GBM``. SHAP values are
+additive, so the explanation of the ensemble is the same weighted sum of the
+members' explanations:
+  * LSTM ensemble -> ``shap.GradientExplainer`` (expected gradients) on every
+    (time step, input) cell of the window,
+  * GBM           -> ``shap.TreeExplainer`` (exact) on the window statistics
+    (last / mean / std / slope), summed back to the input they come from.
 """
 from __future__ import annotations
 
@@ -11,13 +14,12 @@ import numpy as np
 import shap
 import torch
 
-from aerohealth.ml.lstm import RULLSTM
+from aerohealth.ml.features import STATS, window_features
+from aerohealth.ml.nets import Ensemble
 
 
-class _Deterministic(torch.nn.Module):
-    """Wrapper returning (B, 1) and always in eval mode (no MC dropout)."""
-
-    def __init__(self, model: RULLSTM):
+class _Out2D(torch.nn.Module):
+    def __init__(self, model):
         super().__init__()
         self.model = model
 
@@ -25,33 +27,45 @@ class _Deterministic(torch.nn.Module):
         return self.model(x).unsqueeze(-1)
 
 
-class RULExplainer:
-    def __init__(self, model: RULLSTM, background: np.ndarray, features: list[str]):
-        self.features = features
-        self.wrapped = _Deterministic(model).eval()
-        # cuDNN-free LSTM backward needs train mode on some backends; CPU is fine in eval.
-        self.background = torch.from_numpy(background.astype(np.float32))
-        self.explainer = shap.GradientExplainer(self.wrapped, self.background)
-        with torch.no_grad():
-            self.base_value = float(self.wrapped(self.background).mean())
+class EnsembleExplainer:
+    NSAMPLES = 100
 
-    def explain(self, window: np.ndarray, nsamples: int = 200) -> dict:
-        x = torch.from_numpy(window[None].astype(np.float32))
-        values = self.explainer.shap_values(x, nsamples=nsamples, rseed=0)
-        values = np.asarray(values).reshape(window.shape)  # (T, F)
+    def __init__(self, lstms, gbm, w: float, background: np.ndarray, inputs: list[str]):
+        self.inputs, self.w, self.gbm = inputs, w, gbm
+        self.net = _Out2D(Ensemble(lstms)).eval()
+        bg = torch.from_numpy(background.astype(np.float32))
+        self.deep = shap.GradientExplainer(self.net, bg, batch_size=self.NSAMPLES)
+        self.tree = shap.TreeExplainer(gbm)
         with torch.no_grad():
-            prediction = float(self.wrapped(x).squeeze())
-        per_sensor = values.sum(0)
-        order = np.argsort(-np.abs(per_sensor))
+            base_lstm = float(self.net(bg).mean())
+        base_gbm = float(np.ravel(self.tree.expected_value)[0])
+        self.base_value = w * base_lstm + (1 - w) * base_gbm
+        self.deep.shap_values(bg[:1], nsamples=self.NSAMPLES, rseed=0)  # warm-up: first pass at this batch size is slow
+
+    def explain(self, window: np.ndarray) -> dict:
+        T, F = window.shape
+        x = torch.from_numpy(window[None].astype(np.float32))
+        deep = np.asarray(self.deep.shap_values(x, nsamples=self.NSAMPLES, rseed=0)).reshape(T, F)
+        tree = np.asarray(self.tree.shap_values(window_features(window[None]))).reshape(len(STATS), F)
+        with torch.no_grad():
+            p_lstm = float(self.net(x).squeeze())
+        p_gbm = float(self.gbm.predict(window_features(window[None]))[0])
+        prediction = max(self.w * p_lstm + (1 - self.w) * p_gbm, 0.0)
+
+        per_input = self.w * deep.sum(0) + (1 - self.w) * tree.sum(0)
+        order = np.argsort(-np.abs(per_input))
         return {
             "base_value": self.base_value,
-            "prediction": max(prediction, 0.0),
+            "prediction": prediction,
+            "weight_lstm": self.w,
             "features": [
-                {"sensor": self.features[i], "shap_value": float(per_sensor[i]),
-                 "mean_input": float(window[:, i].mean())}
+                {"sensor": self.inputs[i], "shap_value": float(per_input[i]),
+                 "shap_lstm": float(self.w * deep[:, i].sum()),
+                 "shap_gbm": float((1 - self.w) * tree[:, i].sum())}
                 for i in order
             ],
-            "temporal": np.abs(values).sum(1).tolist(),     # importance per time step
-            "heatmap": values.T.tolist(),                    # (F, T) signed
-            "heatmap_sensors": list(self.features),
+            # temporal view only exists for the LSTM part (weighted to its share)
+            "temporal": (self.w * np.abs(deep).sum(1)).tolist(),
+            "heatmap": (self.w * deep.T).tolist(),           # (F, T) signed
+            "heatmap_sensors": list(self.inputs),
         }

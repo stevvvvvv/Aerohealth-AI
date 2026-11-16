@@ -16,8 +16,9 @@ DEFAULT_DATASET = os.getenv("AEROHEALTH_DATASET", "FD001")
 
 # --- Modelling constants -------------------------------------------------
 RUL_CAP = 125          # piecewise-linear RUL target (standard for C-MAPSS)
-WINDOW = 30            # cycles fed to the LSTM
-MC_SAMPLES = 50        # Monte-Carlo dropout passes for uncertainty
+WINDOW = 50            # cycles fed to the models (selected on validation engines)
+N_SEEDS = 3            # LSTMs in the deep ensemble
+AGE_SCALE = 200.0      # cycles-since-new is fed to the models as cycle / AGE_SCALE
 INTERVAL_LEVEL = 0.90  # nominal coverage of the RUL prediction interval
 SEED = 42
 
@@ -54,6 +55,13 @@ SENSOR_INFO: dict[str, dict[str, str]] = {
     "s19": {"name": "PCNfR_dmd", "description": "Demanded corrected fan speed", "unit": "rpm"},
     "s20": {"name": "W31", "description": "HPT coolant bleed", "unit": "lbm/s"},
     "s21": {"name": "W32", "description": "LPT coolant bleed", "unit": "lbm/s"},
+}
+
+# Model inputs = informative sensors + engine age (cycles since new). Age is
+# always known in operations: it is tracked in every engine logbook.
+FEATURE_INFO: dict[str, dict[str, str]] = {
+    **SENSOR_INFO,
+    "age": {"name": "CSN", "description": "Cycles since new (engine age)", "unit": "cycles"},
 }
 
 DATASET_INFO = {

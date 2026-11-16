@@ -72,7 +72,7 @@ export default function EngineView() {
         {hasTruth && <Stat label="True RUL" value={`${L.true_rul} cyc`} sub="NASA ground truth (demo only)" />}
       </div>
 
-      <Card title="Remaining useful life" subtitle="LSTM estimate with Monte-Carlo dropout 90% interval (calibrated). Click the chart to explain a given cycle.">
+      <Card title="Remaining useful life" subtitle="Ensemble of 3 LSTMs + gradient boosting, with a conformal 90% interval calibrated on held-out engines. Click the chart to explain a given cycle.">
         <Plot
           height={340}
           data={[
@@ -163,7 +163,7 @@ export default function EngineView() {
 
       <div className="grid-2">
         <Card title={`Why this prediction? — cycle ${explain.data?.cycle ?? "…"}`}
-              subtitle="SHAP (expected gradients) on the LSTM, summed over the 30-cycle window. Red lowers the predicted RUL, blue raises it.">
+              subtitle={`SHAP on the ensemble (expected gradients for the LSTMs, TreeSHAP for gradient boosting), summed over the ${explain.data?.window_cycles?.length ?? 50}-cycle window. Red lowers the predicted RUL, blue raises it.`}>
           {explain.loading || explain.error ? <Loading error={explain.error} /> : (
             <>
               <p className="small muted">
@@ -171,13 +171,14 @@ export default function EngineView() {
                 prediction <b className="mono">{explain.data.prediction.toFixed(0)}</b> cycles
               </p>
               <Plot
-                height={380}
+                height={400}
                 data={[{
                   type: "bar", orientation: "h",
                   y: [...explain.data.features].reverse().map((f) => `${f.name} · ${f.description}`),
                   x: [...explain.data.features].reverse().map((f) => f.shap_value),
                   marker: { color: [...explain.data.features].reverse().map((f) => (f.shap_value < 0 ? C.neg : C.pos)) },
-                  hovertemplate: "%{y}<br>Contribution %{x:+.1f} cycles<extra></extra>",
+                  customdata: [...explain.data.features].reverse().map((f) => [f.shap_lstm, f.shap_gbm]),
+                  hovertemplate: "%{y}<br>Contribution %{x:+.1f} cycles<br>LSTMs %{customdata[0]:+.1f} · GBM %{customdata[1]:+.1f}<extra></extra>",
                 }]}
                 layout={baseLayout({ margin: { l: 230, r: 16, t: 4, b: 36 }, bargap: 0.3,
                   xaxis: { title: { text: "Contribution to RUL (cycles)" }, zeroline: true, zerolinecolor: C.axis },
@@ -186,14 +187,14 @@ export default function EngineView() {
             </>
           )}
         </Card>
-        <Card title="Attribution over the input window" subtitle="Which sensors at which past cycles drove the estimate">
+        <Card title="Attribution over the input window" subtitle="LSTM part of the ensemble — which inputs at which past cycles drove the estimate">
           {explain.data && (
             <Plot
               height={420}
               data={[{
                 type: "heatmap", z: explain.data.heatmap,
                 x: explain.data.window_cycles,
-                y: explain.data.heatmap_sensors.map((s) => meta[s]?.name || s),
+                y: explain.data.heatmap_names,
                 colorscale: [[0, C.neg], [0.5, C.mid], [1, C.pos]], zmid: 0,
                 colorbar: { title: { text: "cycles", side: "right" }, thickness: 10, outlinewidth: 0, tickfont: { color: C.text2 } },
                 hovertemplate: "%{y} @ cycle %{x}<br>%{z:+.2f}<extra></extra>",

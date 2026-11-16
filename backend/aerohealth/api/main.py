@@ -1,6 +1,8 @@
 """AeroHealth AI — REST API."""
 from __future__ import annotations
 
+import json
+import threading
 from collections import Counter
 from contextlib import asynccontextmanager
 
@@ -17,6 +19,8 @@ from aerohealth.api.services import get_predictor, readings_frame, score_engine
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    # build + warm up the SHAP explainer in the background so the first click is fast
+    threading.Thread(target=lambda: get_predictor().explainer, daemon=True).start()
     yield
 
 
@@ -68,12 +72,21 @@ def health():
 
 @app.get("/api/model", tags=["system"])
 def model_card():
-    m = get_predictor().meta
+    p = get_predictor()
+    m = p.meta
+    benchmarks = {}
+    bench_dir = p.dir / "benchmarks"
+    if bench_dir.exists():
+        for f in sorted(bench_dir.glob("FD00*.json")):
+            benchmarks[f.stem] = json.loads(f.read_text())
+    benchmarks[m["dataset"]] = m["metrics"]
     return {
         "model_version": m["model_version"], "dataset": m["dataset"],
         "trained_at": m["trained_at"], "window": m["window"], "rul_cap": m["rul_cap"],
-        "features": [{"sensor": s, **config.SENSOR_INFO[s]} for s in m["features"]],
+        "n_lstm": m["n_lstm"], "weight_lstm": m["weight_lstm"],
+        "features": [{"sensor": s, **config.FEATURE_INFO[s]} for s in m["inputs"]],
         "metrics": m["metrics"], "history": m["history"],
+        "benchmarks": dict(sorted(benchmarks.items())),
         "thresholds": {"critical_rul": config.CRITICAL_RUL, "warning_rul": config.WARNING_RUL,
                        "alert_probability": config.ALERT_PROBABILITY,
                        "anomaly_persistence": config.ANOMALY_PERSISTENCE},
@@ -82,7 +95,7 @@ def model_card():
 
 @app.get("/api/sensors", tags=["system"])
 def sensors():
-    used = set(get_predictor().features)
+    used = set(get_predictor().sensors)
     return [{"sensor": s, **info, "used_by_model": s in used} for s, info in config.SENSOR_INFO.items()]
 
 
@@ -140,7 +153,7 @@ def engine_sensors(engine_id: int, sensors: str | None = Query(None, description
                    db: Session = Depends(get_db)):
     eng = _engine_or_404(db, engine_id)
     df = readings_frame(db, eng)
-    wanted = sensors.split(",") if sensors else get_predictor().features
+    wanted = sensors.split(",") if sensors else get_predictor().sensors
     unknown = [s for s in wanted if s not in config.SENSOR_INFO]
     if unknown:
         raise HTTPException(422, f"Unknown sensors: {unknown}")
@@ -157,7 +170,8 @@ def engine_explain(engine_id: int, cycle: int | None = None, db: Session = Depen
     if key not in _explain_cache:
         result = get_predictor().explain_cycle(readings_frame(db, eng), cycle)
         for f in result["features"]:
-            f.update(config.SENSOR_INFO[f["sensor"]])
+            f.update(config.FEATURE_INFO[f["sensor"]])
+        result["heatmap_names"] = [config.FEATURE_INFO[s]["name"] for s in result["heatmap_sensors"]]
         _explain_cache[key] = result
     return _explain_cache[key]
 

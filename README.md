@@ -9,7 +9,7 @@ dashboard designed for a maintenance engineer.
 
 | | |
 |---|---|
-| **ML / DL** | PyTorch LSTM · Monte-Carlo dropout · Isolation Forest · SHAP (expected gradients) · scikit-learn |
+| **ML / DL** | PyTorch LSTM deep ensemble · gradient boosting · conformal prediction · Isolation Forest · SHAP · scikit-learn |
 | **Data** | pandas · operating-condition normalisation · sliding windows · PostgreSQL |
 | **Backend** | FastAPI · SQLAlchemy 2 · Pydantic · pytest |
 | **Frontend** | React · Plotly · Vite |
@@ -17,27 +17,53 @@ dashboard designed for a maintenance engineer.
 
 ---
 
-## Results (FD001, official test set — 100 engines)
+## Results
+
+### FD001 — official test set (100 engines, RUL capped at 125)
 
 | Model | RMSE (cycles) | PHM08 score | Uncertainty | Explainability |
 |---|---|---|---|---|
-| **LSTM + MC dropout** (served) | **14.18** | 372 | calibrated 90 % interval — **91 % empirical coverage** | SHAP per sensor × cycle |
-| Gradient boosting on window features (baseline) | 12.41 | 240 | none | SHAP per feature |
+| **Ensemble: 3 LSTMs + gradient boosting** (served) | **12.00** | **241** | conformal 90 % interval — **89 % empirical coverage**, mean width 30 cycles | SHAP per input × cycle |
+| LSTM deep ensemble (×3) | 12.95 | 263 | — | SHAP (expected gradients) |
+| Single LSTM | 12.88 | 260 | — | SHAP (expected gradients) |
+| Gradient boosting on window features (baseline) | 12.47 | 277 | — | TreeSHAP |
+| *v1 of this project: single LSTM + MC dropout, 30-cycle window* | *14.18* | *372* | *91 % coverage, width 51 cycles* | |
 
-| Anomaly detection (validation engines) | |
+### Generalisation — same pipeline retrained on every C-MAPSS subset
+
+| Subset | Setting | Test engines | Ensemble | LSTM ×3 | GBM baseline | Interval coverage (target 90 %) |
+|---|---|---|---|---|---|---|
+| FD001 | 1 flight condition · HPC fault | 100 | **12.00** | 12.95 | 12.47 | 89.0 % |
+| FD002 | 6 flight conditions · HPC fault | 259 | 12.02 | 13.03 | **11.75** | 86.5 % |
+| FD003 | 1 flight condition · HPC + fan faults | 100 | **10.75** | 11.96 | 11.94 | 92.0 % |
+| FD004 | 6 flight conditions · HPC + fan faults | 248 | **11.67** | 11.96 | 12.59 | 84.3 % |
+
+| Anomaly detection (held-out engines, FD001) | |
 |---|---|
-| Engines with a persistent anomaly detected before failure | 100 % |
-| Median lead time before failure | **58 cycles** |
-| False-alarm rate on the healthy portion of life | 0.24 % of cycles |
+| Engines with a persistent anomaly detected before failure | 100 % (all four subsets) |
+| Median lead time before failure | **56 cycles** (47–56 across subsets) |
+| False-alarm rate on the healthy portion of life | 0.35 % of cycles |
 
-**Honest reading.** On FD001 (one operating condition, one fault mode) a well-featured gradient-boosting
-model beats the LSTM on point accuracy — consistent with the literature, where simple models are
-competitive on this subset. The LSTM is served anyway because the product needs a **probability**
-(“P(RUL ≤ 20 cycles) = 87 %”), not just a number, and temporal attributions. A natural next step is an
-ensemble, or quantile gradient boosting, compared on the same coverage metric.
+**What changed from v1, and why it works**
 
-Published state-of-the-art on FD001 is roughly RMSE 11–13; this project targets a sound, explainable,
-end-to-end system rather than leaderboard tuning.
+1. **Engine age as an input** (cycles since new, always known from the engine logbook). It tells the
+   model where the engine is in its life, which the 30-cycle sensor window alone cannot.
+   Ablation with the GBM: RMSE 13.50 → 12.47 on FD001, 13.97 → 12.59 on FD004.
+2. **Longer window** (50 cycles, selected on validation engines) to capture the degradation trend.
+3. **Ensemble of two model families.** LSTMs and gradient boosting make different errors; their
+   weighted average (weight chosen on validation engines) beats each member on 3 subsets out of 4.
+4. **Conformal intervals instead of MC dropout.** Residuals of held-out engines, grouped by predicted
+   RUL, give intervals **40 % narrower** than v1 on average (30 vs 51 cycles) while keeping ~90 % coverage —
+   and a non-parametric P(RUL ≤ threshold) for the alerts.
+
+**Honest reading.**
+- The margin over the GBM baseline is real but small on FD001 (0.5 cycle on 100 engines, i.e. within
+  test-set noise), clearer on FD003/FD004, and **the baseline wins on FD002**. The case for the ensemble is
+  consistency across subsets plus calibrated uncertainty and temporal explanations, not a big jump on one number.
+- Coverage drops to 84–87 % on the six-condition subsets: the calibration engines are fewer than the
+  diversity of regimes. Calibrating per operating condition is the obvious next step.
+- Using engine age departs from the most common C-MAPSS protocol, so these numbers are not directly
+  comparable to published leaderboards.
 
 ---
 
@@ -47,7 +73,7 @@ end-to-end system rather than leaderboard tuning.
 ![Fleet overview](docs/01-fleet.png)
 
 **Engine view: sensors & explainability** — raw sensor trends with anomalous cycles shaded, SHAP attribution per sensor and per past cycle, alert history
-![Sensors and SHAP](docs/03-engine-sensors-shap.png)
+![Sensors and SHAP](docs/03-engine.png)
 
 **Alerts** — RUL and anomaly alerts with confidence level and acknowledgement
 ![Alerts](docs/04-alerts.png)
@@ -62,13 +88,14 @@ end-to-end system rather than leaderboard tuning.
 ```
 C-MAPSS raw (21 sensors, 3 settings)
    │  normalise per operating condition (KMeans on settings for FD002/FD004)
-   │  drop non-informative channels → 15 sensors kept on FD001
+   │  drop non-informative channels → 15 sensors on FD001, + engine age (cycles since new)
    ▼
-30-cycle sliding windows ──► LSTM (2×64) ──► RUL, capped at 125 cycles
-                                │  50 MC-dropout passes → mean, std
-                                │  std rescaled on validation engines so the 90 % interval covers 90 %
-                                ▼
-                        P(RUL ≤ 20), P(RUL ≤ 50)  ──►  RUL alerts (CRITICAL / WARNING)
+50-cycle sliding windows ─┬─► 3 LSTMs (2×64, different seeds) ── mean ──┐
+                          └─► window stats (last/mean/std/slope) ─► GBM ─┴─► weighted average = RUL
+                                                                              │
+                     residuals of held-out "calibration" engines, by RUL bin ─┤ split-conformal
+                                                                              ▼
+                              90 % interval, P(RUL ≤ 20), P(RUL ≤ 50)  ──►  RUL alerts (CRITICAL / WARNING)
 
 smoothed sensors ──► Isolation Forest fitted on healthy early life (first 30 %)
                         │  anomaly score, threshold = 99th pct of healthy data
@@ -76,16 +103,19 @@ smoothed sensors ──► Isolation Forest fitted on healthy early life (first 
                         ▼
                     persistent anomaly (3 cycles)  ──►  ANOMALY alerts + top deviating sensors
 
-SHAP GradientExplainer on the LSTM ──► contribution of each sensor at each past cycle
+SHAP: expected gradients on the LSTMs + TreeSHAP on the GBM, combined with the ensemble weight
+      ──► contribution of each input (and, for the LSTM part, of each past cycle)
 ```
 
 Key design decisions:
 
 - **Piecewise-linear RUL target (cap 125).** Early in life, degradation is not observable; capping
   avoids asking the model to guess the unguessable. It is the standard C-MAPSS protocol.
-- **Validation split by engine, not by row**, so no engine leaks between train and validation.
-- **Calibrated uncertainty.** Raw MC-dropout intervals are too narrow; a single scale factor is fitted
-  on held-out engines (split-conformal style) and checked on the test set (91 % for a 90 % target).
+- **Engine-level 70 / 15 / 15 split** (train / validation / calibration), so no engine leaks between
+  fitting, model selection and uncertainty calibration.
+- **Calibrated uncertainty.** Split-conformal prediction on engines never used for training or model
+  selection, conditioned on the predicted RUL (errors are much smaller close to failure), checked on the
+  official test sets.
 - **Alerts on state transitions with hysteresis**, not one per cycle — maintenance teams ignore noisy
   systems. Each alert carries a confidence: model probability for RUL alerts, share of the healthy
   baseline exceeded for anomaly alerts.
@@ -121,7 +151,8 @@ cd backend
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements-dev.txt
 python -m scripts.download_data
-python -m aerohealth.ml.train --dataset FD001   # ~1-2 min on CPU
+python -m aerohealth.ml.train --dataset FD001   # ~10 min on a laptop CPU
+python -m aerohealth.ml.train --dataset FD004 --metrics-only   # benchmark another subset
 python -m aerohealth.api.seed --reset           # SQLite by default, set DATABASE_URL for Postgres
 uvicorn aerohealth.api.main:app --reload
 python -m pytest -q
@@ -156,18 +187,20 @@ backend/
     config.py            constants, thresholds, sensor dictionary
     ml/
       data.py            loading, RUL labelling, normalisation, windowing
-      lstm.py            model, training loop, MC-dropout inference
+      nets.py            LSTM, deep-ensemble wrapper, training loop
+      features.py        window statistics for the gradient-boosting member
+      conformal.py       RUL-conditioned split-conformal intervals and probabilities
       health.py          Isolation Forest, health index, anomaly persistence
-      explain.py         SHAP GradientExplainer wrapper
+      explain.py         SHAP for the ensemble (expected gradients + TreeSHAP)
       metrics.py         RMSE, PHM08 score, interval coverage
       predictor.py       inference facade used by the API
-      train.py           end-to-end training + evaluation + baseline
+      train.py           end-to-end training, ensemble weighting, calibration, evaluation
     api/
       db.py              SQLAlchemy models (engines, readings, predictions, alerts)
       services.py        scoring orchestration and alert state machine
       main.py            FastAPI routes
       seed.py            loads the C-MAPSS test fleet
-  artifacts/             trained model, preprocessor, metrics (meta.json)
+  artifacts/             trained models, preprocessor, metrics (meta.json), benchmarks/ for FD002-FD004
   tests/                 unit + API tests
 frontend/                React + Plotly dashboard (fleet, engine, alerts, model card)
 docker-compose.yml       PostgreSQL + API + nginx
@@ -177,9 +210,8 @@ docker-compose.yml       PostgreSQL + API + nginx
 
 - C-MAPSS is a simulation; real engine data (ACARS/EHM snapshots) is sparser, noisier and has
   maintenance actions (water washes, module swaps) that reset degradation.
-- Only FD001 is served. The pipeline already handles multi-condition subsets (`--dataset FD004`),
-  which need more tuning.
-- Ensemble / quantile gradient boosting to combine the baseline's accuracy with calibrated intervals.
+- Only FD001 is served in the dashboard; FD002–FD004 are benchmarked with the same pipeline.
+- Per-operating-condition conformal calibration to bring coverage back to 90 % on FD002/FD004.
 - Model registry and drift monitoring (MLflow) for retraining in production.
 
 ## Data & references

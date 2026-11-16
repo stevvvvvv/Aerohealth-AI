@@ -1,0 +1,30 @@
+{
+  "dataset": "FD002",
+  "n_test_engines": 259,
+  "window": 50,
+  "ensemble_weight_lstm": 0.6,
+  "ensemble": {
+    "rmse": 12.02,
+    "nasa_score": 690.5,
+    "interval_coverage_pct": 86.5,
+    "mean_interval_width": 29.9
+  },
+  "lstm_ensemble": {
+    "rmse": 13.03,
+    "nasa_score": 951.9
+  },
+  "lstm_single": {
+    "rmse": 13.77,
+    "nasa_score": 1191.0
+  },
+  "gbm": {
+    "rmse": 11.75,
+    "nasa_score": 627.3
+  },
+  "anomaly_detection": {
+    "engines_detected_pct": 100.0,
+    "median_lead_time_cycles": 48.5,
+    "false_alarm_rate_pct": 0.04
+  },
+  "interval_level_pct": 90
+}

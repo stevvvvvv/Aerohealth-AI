@@ -25,7 +25,7 @@ export default function Fleet() {
 
   if (loading || error) return <Loading error={error} />;
   const atRisk = [...data.engines].sort((a, b) => a.rul_mean - b.rul_mean).slice(0, 15).reverse();
-  const m = model.data?.metrics?.lstm;
+  const m = model.data?.metrics?.ensemble;
 
   return (
     <>
@@ -41,7 +41,7 @@ export default function Fleet() {
           <Stat key={s} label={<><span style={{ color: STATUS[s].color }}>{STATUS[s].icon}</span> {STATUS[s].label}</>}
                 value={data.counts[s] || 0} sub="engines" />
         ))}
-        <Stat label="Model RMSE (test)" value={m ? `${m.rmse}` : "—"} sub={m ? `cycles · ${m.interval_coverage_pct}% interval coverage` : ""} />
+        <Stat label="Model RMSE (test)" value={m ? Number(m.rmse).toFixed(2) : "—"} sub={m ? `cycles · ${m.interval_coverage_pct}% interval coverage` : ""} />
       </div>
 
       <div className="grid-2">

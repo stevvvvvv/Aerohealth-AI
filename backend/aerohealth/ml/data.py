@@ -108,7 +108,12 @@ class Preprocessor:
             out[config.SENSOR_COLS] = out.groupby("unit")[config.SENSOR_COLS].transform(
                 lambda s: s.ewm(alpha=self.smooth_alpha, adjust=True).mean()
             )
+        out["age"] = out["cycle"] / config.AGE_SCALE
         return out
+
+    @property
+    def model_inputs(self) -> list[str]:
+        return [*self.features, "age"]
 
 
 # ---------------------------------------------------------------------------

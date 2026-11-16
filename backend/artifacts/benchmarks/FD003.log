@@ -1,0 +1,39 @@
+[FD003] inputs (17): ['s2', 's3', 's4', 's6', 's7', 's8', 's9', 's10', 's11', 's12', 's13', 's14', 's15', 's17', 's20', 's21', 'age']
+windows train (17804, 50, 17)  val (3506, 50, 17)  calib (3410, 50, 17)  test (100, 50, 17)
+LSTM seed 0
+  27 epochs, best val RMSE 8.55
+LSTM seed 1
+  30 epochs, best val RMSE 8.89
+LSTM seed 2
+  42 epochs, best val RMSE 8.89
+ensemble weight on LSTM = 0.6  (val RMSE 7.19)
+{
+  "dataset": "FD003",
+  "n_test_engines": 100,
+  "window": 50,
+  "ensemble_weight_lstm": 0.6,
+  "ensemble": {
+    "rmse": 10.75,
+    "nasa_score": 188.5,
+    "interval_coverage_pct": 92.0,
+    "mean_interval_width": 31.8
+  },
+  "lstm_ensemble": {
+    "rmse": 11.96,
+    "nasa_score": 234.0
+  },
+  "lstm_single": {
+    "rmse": 13.73,
+    "nasa_score": 354.1
+  },
+  "gbm": {
+    "rmse": 11.94,
+    "nasa_score": 257.9
+  },
+  "anomaly_detection": {
+    "engines_detected_pct": 100.0,
+    "median_lead_time_cycles": 55.5,
+    "false_alarm_rate_pct": 0.44
+  },
+  "interval_level_pct": 90
+}

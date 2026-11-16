@@ -1,4 +1,4 @@
-"""LSTM regressor for Remaining Useful Life with Monte-Carlo dropout uncertainty."""
+"""LSTM regressor for Remaining Useful Life and its deep-ensemble wrapper."""
 from __future__ import annotations
 
 import copy
@@ -81,17 +81,18 @@ def predict(model: RULLSTM, X: np.ndarray, batch: int = 4096) -> np.ndarray:
     return np.clip(np.concatenate(out), 0, None)
 
 
+class Ensemble(nn.Module):
+    """Average of several networks (deep ensemble). Differentiable -> SHAP-able."""
+
+    def __init__(self, members: list[nn.Module]):
+        super().__init__()
+        self.members = nn.ModuleList(members)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.stack([m(x) for m in self.members]).mean(0)
+
+
 @torch.no_grad()
-def predict_mc(model: RULLSTM, X: np.ndarray, samples: int = 50, batch: int = 4096,
-               seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    """Monte-Carlo dropout: keep dropout active at inference -> mean and std."""
-    torch.manual_seed(seed)
-    model.train()  # activates dropout (no batch-norm in this model)
-    means, stds = [], []
-    for i in range(0, len(X), batch):
-        xb = torch.from_numpy(X[i:i + batch])
-        draws = torch.stack([model(xb) for _ in range(samples)]).clamp(min=0)
-        means.append(draws.mean(0).numpy())
-        stds.append(draws.std(0).numpy())
-    model.eval()
-    return np.concatenate(means), np.concatenate(stds)
+def predict_members(models: list[nn.Module], X: np.ndarray) -> np.ndarray:
+    """(n_models, n_samples) predictions, used for the ensemble spread."""
+    return np.stack([predict(m, X) for m in models])

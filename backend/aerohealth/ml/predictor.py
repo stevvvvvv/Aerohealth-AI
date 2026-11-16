@@ -9,20 +9,19 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
-from scipy.stats import norm
 
 from aerohealth import config
+from aerohealth.ml.conformal import BinnedConformal
 from aerohealth.ml.data import unit_windows
+from aerohealth.ml.features import window_features
 from aerohealth.ml.health import HealthModel
-from aerohealth.ml.lstm import RULLSTM, predict_mc
-
-Z = norm.ppf(0.5 + config.INTERVAL_LEVEL / 2)
+from aerohealth.ml.nets import RULLSTM, predict_members
 
 
 class EnginePredictor:
     def __init__(self, artifacts_dir: Path | str | None = None):
         d = Path(artifacts_dir or config.ARTIFACTS_DIR)
-        if not (d / "lstm.pt").exists():
+        if not (d / "meta.json").exists():
             raise FileNotFoundError(
                 f"No trained model in {d}. Run `python -m aerohealth.ml.train` first."
             )
@@ -30,13 +29,18 @@ class EnginePredictor:
         self.meta = json.loads((d / "meta.json").read_text())
         self.preprocessor = joblib.load(d / "preprocessor.joblib")
         self.health: HealthModel = joblib.load(d / "health.joblib")
-        ckpt = torch.load(d / "lstm.pt", map_location="cpu", weights_only=False)
-        self.model = RULLSTM(**ckpt["config"])
-        self.model.load_state_dict(ckpt["state_dict"])
-        self.model.eval()
-        self.features: list[str] = self.meta["features"]
+        self.gbm = joblib.load(d / "gbm.joblib")
+        self.conformal: BinnedConformal = joblib.load(d / "conformal.joblib")
+        self.lstms: list[RULLSTM] = []
+        for i in range(self.meta["n_lstm"]):
+            ckpt = torch.load(d / f"lstm_{i}.pt", map_location="cpu", weights_only=False)
+            m = RULLSTM(**ckpt["config"])
+            m.load_state_dict(ckpt["state_dict"])
+            self.lstms.append(m.eval())
+        self.sensors: list[str] = self.meta["sensors"]   # monitored sensors
+        self.inputs: list[str] = self.meta["inputs"]     # sensors + age
         self.window: int = self.meta["window"]
-        self.k: float = self.meta["calibration_k"]
+        self.w: float = self.meta["weight_lstm"]
 
     @property
     def version(self) -> str:
@@ -44,35 +48,40 @@ class EnginePredictor:
 
     @cached_property
     def explainer(self):
-        from aerohealth.ml.explain import RULExplainer
+        from aerohealth.ml.explain import EnsembleExplainer
         background = np.load(self.dir / "shap_background.npy")
-        return RULExplainer(self.model, background, self.features)
+        return EnsembleExplainer(self.lstms, self.gbm, self.w, background, self.inputs)
 
     # ------------------------------------------------------------------
     def _windows(self, unit_df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray]:
         df = unit_df.sort_values("cycle").reset_index(drop=True)
         norm_df = self.preprocessor.transform(df)
-        return norm_df, unit_windows(norm_df[self.features].to_numpy(np.float32), self.window)
+        return norm_df, unit_windows(norm_df[self.inputs].to_numpy(np.float32), self.window)
 
-    def predict_unit(self, unit_df: pd.DataFrame, samples: int = config.MC_SAMPLES) -> pd.DataFrame:
+    def predict_windows(self, windows: np.ndarray) -> dict[str, np.ndarray]:
+        members = predict_members(self.lstms, windows)
+        lstm = members.mean(0)
+        gbm = np.clip(self.gbm.predict(window_features(windows)), 0, None)
+        mean = self.w * lstm + (1 - self.w) * gbm
+        lo, hi = self.conformal.interval(mean)
+        return {
+            "rul_mean": mean, "rul_lower": lo, "rul_upper": hi,
+            "rul_lstm": lstm, "rul_gbm": gbm, "rul_spread": members.std(0),
+            "p_critical": self.conformal.prob_below(mean, config.CRITICAL_RUL),
+            "p_warning": self.conformal.prob_below(mean, config.WARNING_RUL),
+        }
+
+    def predict_unit(self, unit_df: pd.DataFrame) -> pd.DataFrame:
         """Score every cycle of one engine. ``unit_df`` holds raw sensor columns."""
         norm_df, windows = self._windows(unit_df)
-        mean, std = predict_mc(self.model, windows, samples=samples)
-        half = self.k * std
-        sd_eff = np.maximum(half / Z, 1e-3)
         out = self.health.analyse_unit(norm_df)
-        out["rul_mean"] = mean
-        out["rul_std"] = std
-        out["rul_lower"] = np.clip(mean - half, 0, None)
-        out["rul_upper"] = mean + half
-        out["p_critical"] = norm.cdf((config.CRITICAL_RUL - mean) / sd_eff)
-        out["p_warning"] = norm.cdf((config.WARNING_RUL - mean) / sd_eff)
+        for k, v in self.predict_windows(windows).items():
+            out[k] = v
         return out
 
     def explain_cycle(self, unit_df: pd.DataFrame, cycle: int) -> dict:
         norm_df, windows = self._windows(unit_df)
-        idx = int(np.searchsorted(norm_df["cycle"].to_numpy(), cycle))
-        idx = min(idx, len(windows) - 1)
+        idx = min(int(np.searchsorted(norm_df["cycle"].to_numpy(), cycle)), len(windows) - 1)
         result = self.explainer.explain(windows[idx])
         result["cycle"] = int(norm_df["cycle"].iloc[idx])
         start = result["cycle"] - self.window + 1
