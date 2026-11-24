@@ -28,7 +28,7 @@ export default function Model() {
         </div>
       </header>
 
-      <div className="stats">
+      <div className="readouts">
         <Stat label="Ensemble RMSE" value={f2(m.ensemble.rmse)} sub={`cycles · baseline GBM ${f2(m.gbm.rmse)}`} />
         <Stat label="PHM08 score" value={m.ensemble.nasa_score} sub={`baseline ${m.gbm.nasa_score} · lower is better`} />
         <Stat label="Interval coverage" value={`${m.ensemble.interval_coverage_pct}%`} sub={`target ${m.interval_level_pct}% · width ${m.ensemble.mean_interval_width} cyc`} />

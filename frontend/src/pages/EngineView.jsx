@@ -4,6 +4,7 @@ import { api } from "../api.js";
 import { useFetch } from "../useFetch.js";
 import Plot from "../components/Plot.jsx";
 import { Card, Loading, Stat, StatusBadge, fmt, pct } from "../components/ui.jsx";
+import Gauge from "../components/Gauge.jsx";
 import AlertList from "../components/AlertList.jsx";
 import { C, STATUS, baseLayout } from "../theme.js";
 
@@ -17,7 +18,7 @@ function anomalyShapes(preds, yref = "paper") {
     if (start != null && end) {
       shapes.push({
         type: "rect", xref: "x", yref, x0: start - 0.5, x1: (p.is_anomaly ? p.cycle : preds[i - 1].cycle) + 0.5,
-        y0: 0, y1: 1, fillcolor: "rgba(250,178,25,0.10)", line: { width: 0 }, layer: "below",
+        y0: 0, y1: 1, fillcolor: "rgba(242,154,56,0.09)", line: { width: 0 }, layer: "below",
       });
       start = null;
     }
@@ -60,30 +61,44 @@ export default function EngineView() {
       <header className="page-head">
         <div>
           <p className="crumbs"><Link to="/">Fleet</Link> / {e.serial}</p>
-          <h1 className="mono">{e.serial} <StatusBadge status={e.status} /></h1>
+          <h1><span className="mono">{e.serial}</span> <StatusBadge status={e.status} /></h1>
           <p className="muted">C-MAPSS {e.dataset} · unit {e.id} · {e.last_cycle} flight cycles recorded</p>
         </div>
       </header>
 
-      <div className="stats">
-        <Stat label="Predicted RUL" value={`${fmt(L.rul_mean)} cyc`} sub={`90% interval ${fmt(L.rul_lower)}–${fmt(L.rul_upper)}`} />
-        <Stat label="P(RUL ≤ 20 cycles)" value={pct(L.p_critical)} sub="critical threshold" accent={L.p_critical >= 0.5 ? STATUS.CRITICAL.color : undefined} />
-        <Stat label="Health index" value={pct(L.health_index)} sub={L.is_anomaly ? "anomalous behaviour" : "within healthy envelope"} />
-        {hasTruth && <Stat label="True RUL" value={`${L.true_rul} cyc`} sub="NASA ground truth (demo only)" />}
-      </div>
-
-      <Card title="Remaining useful life" subtitle="Ensemble of 3 LSTMs + gradient boosting, with a conformal 90% interval calibrated on held-out engines. Click the chart to explain a given cycle.">
+      <div className="hero">
+        <section className="gauge-panel" aria-label="Remaining useful life gauge">
+          <h3>Remaining useful life</h3>
+          <Gauge mean={L.rul_mean} lower={L.rul_lower} upper={L.rul_upper} status={e.status} />
+          <div className="gauge-legend">
+            <span><i style={{ background: STATUS.CRITICAL.color }} />critical ≤ 20</span>
+            <span><i style={{ background: STATUS.WARNING.color }} />warning ≤ 50</span>
+            <span><i style={{ background: "#1b98b8" }} />90% interval</span>
+          </div>
+          <div className="gauge-probs">
+            <div><span>P(RUL ≤ 20 cycles), removal</span><b style={L.p_critical >= 0.5 ? { color: STATUS.CRITICAL.color } : undefined}>{pct(L.p_critical)}</b></div>
+            <div><span>P(RUL ≤ 50 cycles), inspection</span><b style={L.p_warning >= 0.5 ? { color: STATUS.WARNING.color } : undefined}>{pct(L.p_warning)}</b></div>
+          </div>
+        </section>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
+          <div className="readouts">
+            <Stat label="Flight cycles recorded" value={e.last_cycle} sub={`unit ${e.id} of the test fleet`} />
+            <Stat label="Open alerts" value={e.open_alerts} sub="see alert history below" accent={e.open_alerts ? STATUS.WARNING.color : undefined} />
+            <Stat label="Health index" value={pct(L.health_index)} sub={L.is_anomaly ? "anomalous behaviour" : "within healthy envelope"} />
+            {hasTruth && <Stat label="True RUL" value={`${L.true_rul}`} sub="NASA ground truth, for evaluation" />}
+          </div>
+          <Card title="RUL over the engine's life" subtitle="Ensemble estimate at every flight cycle with its 90% interval, against the NASA ground truth. Select a point to explain that cycle.">
         <Plot
-          height={340}
+          height={300}
           data={[
             { x, y: P.map((p) => p.rul_upper), mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
             { x, y: P.map((p) => p.rul_lower), mode: "lines", line: { width: 0 }, fill: "tonexty",
-              fillcolor: "rgba(57,135,229,0.18)", name: "90% interval", hoverinfo: "skip" },
+              fillcolor: "rgba(27,152,184,0.22)", name: "90% interval", hoverinfo: "skip" },
             { x, y: P.map((p) => p.rul_mean), mode: "lines", name: "Predicted RUL", line: { color: C.series[0], width: 2 },
               customdata: P.map((p) => [p.rul_lower, p.rul_upper, p.p_critical]),
               hovertemplate: "Cycle %{x}<br>RUL %{y:.0f} [%{customdata[0]:.0f}–%{customdata[1]:.0f}]<br>P(≤20) %{customdata[2]:.0%}<extra></extra>" },
             ...(hasTruth ? [{ x, y: P.map((p) => Math.min(p.true_rul, 125)), mode: "lines", name: "True RUL (capped 125)",
-              line: { color: C.series[1], width: 2, dash: "dash" }, hovertemplate: "True RUL %{y}<extra></extra>" }] : []),
+              line: { color: C.magenta, width: 2, dash: "dash" }, hovertemplate: "True RUL %{y}<extra></extra>" }] : []),
           ]}
           layout={baseLayout({
             hovermode: "x unified",
@@ -92,7 +107,7 @@ export default function EngineView() {
             shapes: [
               ...[20, 50].map((y) => ({ type: "line", xref: "paper", x0: 0, x1: 1, y0: y, y1: y,
                 line: { color: y === 20 ? STATUS.CRITICAL.color : STATUS.WARNING.color, width: 1, dash: "dot" } })),
-              ...(cycle ? [{ type: "line", x0: cycle, x1: cycle, yref: "paper", y0: 0, y1: 1, line: { color: C.text2, width: 1 } }] : []),
+              ...(cycle ? [{ type: "line", x0: cycle, x1: cycle, yref: "paper", y0: 0, y1: 1, line: { color: C.cyanBright, width: 1 } }] : []),
             ],
             annotations: [20, 50].map((y) => ({ xref: "paper", x: 1, y, text: y === 20 ? "critical" : "warning",
               showarrow: false, xanchor: "right", yanchor: "bottom", font: { size: 11, color: C.muted } })),
@@ -101,8 +116,11 @@ export default function EngineView() {
         />
       </Card>
 
+        </div>
+      </div>
+
       <div className="grid-2">
-        <Card title="Health index" subtitle="Isolation Forest vs. healthy baseline · shaded = persistent anomaly">
+        <Card title="Health index" subtitle="Isolation Forest score against the healthy baseline. Shaded cycles are persistent anomalies.">
           <Plot
             height={260}
             data={[{ x, y: P.map((p) => p.health_index), mode: "lines", line: { color: C.series[0], width: 2 },
@@ -119,7 +137,7 @@ export default function EngineView() {
               hovertemplate: "Cycle %{x}<br>Score %{y:.3f}<extra></extra>" }]}
             layout={baseLayout({
               shapes: [...shapes, { type: "line", xref: "paper", x0: 0, x1: 1, y0: e.anomaly_threshold, y1: e.anomaly_threshold,
-                line: { color: STATUS.WATCH.color, width: 1, dash: "dot" } }],
+                line: { color: STATUS.WARNING.color, width: 1, dash: "dot" } }],
               xaxis: { title: { text: "Flight cycle" } },
             })}
           />
@@ -128,7 +146,7 @@ export default function EngineView() {
 
       <Card
         title="Sensor explorer"
-        subtitle="Raw measurements — pick up to 3 sensors. Shaded = anomalous cycles."
+        subtitle="Raw measurements, up to 3 sensors at a time. Shaded cycles are persistent anomalies."
         actions={
           <div className="chips">
             {usedSensors.map((s) => (
@@ -162,8 +180,8 @@ export default function EngineView() {
       </Card>
 
       <div className="grid-2">
-        <Card title={`Why this prediction? — cycle ${explain.data?.cycle ?? "…"}`}
-              subtitle={`SHAP on the ensemble (expected gradients for the LSTMs, TreeSHAP for gradient boosting), summed over the ${explain.data?.window_cycles?.length ?? 50}-cycle window. Red lowers the predicted RUL, blue raises it.`}>
+        <Card title={`Why the estimate at cycle ${explain.data?.cycle ?? "…"}`}
+              subtitle={`SHAP on the ensemble (expected gradients for the LSTMs, TreeSHAP for gradient boosting), summed over the ${explain.data?.window_cycles?.length ?? 50}-cycle window. Amber lowers the predicted RUL, cyan raises it.`}>
           {explain.loading || explain.error ? <Loading error={explain.error} /> : (
             <>
               <p className="small muted">
@@ -187,7 +205,7 @@ export default function EngineView() {
             </>
           )}
         </Card>
-        <Card title="Attribution over the input window" subtitle="LSTM part of the ensemble — which inputs at which past cycles drove the estimate">
+        <Card title="Attribution over the input window" subtitle="LSTM part of the ensemble: which inputs, at which past cycles, drove the estimate.">
           {explain.data && (
             <Plot
               height={420}
@@ -207,7 +225,7 @@ export default function EngineView() {
         </Card>
       </div>
 
-      <Card title="Alert history" subtitle="Raised on state transitions (with hysteresis) to avoid alert fatigue">
+      <Card title="Alert history" subtitle="Raised on state changes only, with hysteresis, to avoid alert fatigue.">
         {alerts.data ? <AlertList alerts={alerts.data} onChange={alerts.reload} compact /> : <Loading error={alerts.error} />}
       </Card>
     </>
